@@ -53,7 +53,6 @@ def create_visualisation(T_num=1000):
                 cnt += len(lines)//T_num 
 
     create_original_graph(trajs, traj_list)
-
     
     trajs_segmented = []
 
@@ -68,11 +67,47 @@ def create_visualisation(T_num=1000):
     
     trajs_segmented = []    
 
-    for i in tqdm(range(len(trajs)), desc='Segmenting trajectories'):
-        trajs_segmented.append(segment_trajectory_dyn(trajs[i][0], trajs[i][1], trajs[i][2]))
+    for i in tqdm(range(len(trajs)), desc="segmenting trajectories"):
+        trajs_segmented.append(segment_trajectory_simul(trajs[i][0], trajs[i][1], trajs[i][2]))
 
-    create_fit_graph_new(trajs_segmented,traj_list)
-    
+    #for i in tqdm(range(len(trajs)), desc='Segmenting trajectories'):
+    #    trajs_segmented.append(segment_trajectory_dyn(trajs[i][0], trajs[i][1], trajs[i][2]))
+
+    #reate_fit_graph_new(trajs_segmented,traj_list)
+    create_fit_graph_new2(trajs_segmented,traj_list)
+
+def save_to_file(path, polynomials, segments):
+    pass 
+
+def create_fit_graph_new2(trajs, name):
+    dir = f'{path}Simplified_trajectories_new'
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+
+
+    for traj, name in zip(trajs, name):
+        lons = []
+        
+        lats = []
+    #time = [x for x in range(0,traj[1][-1][1])]
+
+        for polynomials, segment in zip(traj[0],traj[1]):
+            for i in range(segment[0],segment[1] + 1):
+                lons.append(polynomials[0](i))
+                lats.append(polynomials[1](i))
+        
+        plt.figure(figsize=(8, 6))
+
+        plt.plot(lons,lats)
+
+        plt.title(f'Polynomial prediction of trajectory {name}')
+        plt.xlabel('lon')
+        plt.ylabel('lat')
+
+        plt.savefig(f'{path}Simplified_trajectories_new/{name}')
+        plt.close()
+
+
 
 def create_fit_graph_new(trajs, name):
     dir = f'{path}Simplified_trajectories_new'
@@ -112,9 +147,7 @@ def create_original_graph(trajs, names):
     if not os.path.exists(dir):
         os.makedirs(dir)
 
-    #print(len(trajs))
-    #print(len(names))
-    
+
     for traj, name in zip(trajs, names):
         lon = traj[0]
         lat = traj[1]
@@ -187,9 +220,15 @@ def segment_trajectory_dyn(lon, lat, time, segment_upper_bound=None):
         lon_segments = lon_segments + temp_lon_segments
     return polynomials_lat, lat_segments, polynomials_lon, lon_segments
 
-def print_point(x,y):
-    print(f"{x},{y}")
-
+def segment_trajectory_simul(lon, lat, time):
+    pre_segmentation = find_jumps(lon,lat)
+    polynomials = []
+    segments = []
+    for start, end in pre_segmentation:
+        _, temp_poly, temp_seg = segment_series_simul(time,lon,lat,start,end)
+        polynomials = polynomials + temp_poly
+        segments = segments + temp_seg
+    return polynomials, segments
 
 def segment_trajectory_dyn_old(lon, lat, time,start_index, end_index = None, segment_upper_bound=None):
     _,polynomials_lat,lat_segments = segment_series(time,lat,start_index,len(time))
@@ -309,7 +348,33 @@ def segment_series(time, x, start, end):
             return sum_error, polynomial_list1 + polynomial_list2, segments1 + segments2
         else:
             return error, [polynomial], [(start, end)]
- 
+        
+def segment_series_simul(time, x,y, start, end):
+    #print(f"{start}, {end}")
+    if start == end:
+        return 0, [(np.polynomial.Polynomial(x[start]),np.polynomial.Polynomial(y[start]))], [(start,end)]
+    if end - start == 1:
+        a1 = (x[end]-x[start])/(time[end]-time[start])
+        a2 = (y[end]-y[start])/(time[end]-time[start])
+        return 0, [(np.polynomial.Polynomial([x[start]-time[start]*a1,a1]),np.polynomial.Polynomial([x[start]-time[start]*a2,a2]))], [(start,end)]
+    polynomial_x = fit_polynomial(time[start:end],x[start:end])
+    polynomial_y = fit_polynomial(time[start:end],y[start:end])
+    error_x,_ = calc_error_SSE(start,end,x,polynomial_x)
+    error_y,_ = calc_error_SSE(start,end,y,polynomial_y)
+    if(end-start < 2*N): 
+        return error_x+error_y, [(polynomial_x,polynomial_y)],[(start,end)]
+    else:
+        q = (start + end)//2
+        sum_error1, polynomial_list1, segments1 = segment_series_simul(time, x,y, start,q-1)
+        sum_error2, polynomial_list2, segments2 = segment_series_simul(time, x,y, q,end)
+        sum_error = sum_error2 + sum_error1
+        if(sum_error < error_x+error_y):
+            return sum_error, polynomial_list1 + polynomial_list2, segments1 + segments2
+        else:
+            return error_x+error_y, [(polynomial_x,polynomial_y)], [(start, end)]
+
+
+
 E = np.exp(1)
 
 def calc_error_SSE(start_index, end_index, values, polynomial):
