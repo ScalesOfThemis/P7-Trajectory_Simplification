@@ -7,13 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import make_smoothing_spline, BSpline
 from sys import getsizeof
+from haversine import haversine, Unit
 # from curve_fitter import fit_polynomial
 np.set_printoptions(threshold=np.inf)
 
 
-lon_segments = []
-lat_segments = []
-time_segments = []
 
 N = 10 #Lower bound on segment size
 
@@ -53,61 +51,23 @@ def create_visualisation(T_num=1000):
                 cnt += len(lines)//T_num 
 
     create_original_graph(trajs, traj_list)
+
     
     trajs_segmented = []
 
     for i in tqdm(range(len(trajs)), desc='Segmenting trajectories'):
         lons, lats, times = segment_trajectory(trajs[i][0], trajs[i][1], trajs[i][2])
         trajs_segmented.append([lons.copy(), lats.copy(), times.copy()])
-        lon_segments.clear()
-        lat_segments.clear()
-        time_segments.clear()
 
     create_fit_graph(trajs_segmented, traj_list)
     
     trajs_segmented = []    
 
-    for i in tqdm(range(len(trajs)), desc="segmenting trajectories"):
-        trajs_segmented.append(segment_trajectory_simul(trajs[i][0], trajs[i][1], trajs[i][2]))
+    for i in tqdm(range(len(trajs)), desc='Segmenting trajectories'):
+        trajs_segmented.append(segment_trajectory_dyn(trajs[i][0], trajs[i][1], trajs[i][2]))
 
-    #for i in tqdm(range(len(trajs)), desc='Segmenting trajectories'):
-    #    trajs_segmented.append(segment_trajectory_dyn(trajs[i][0], trajs[i][1], trajs[i][2]))
-
-    #reate_fit_graph_new(trajs_segmented,traj_list)
-    create_fit_graph_new2(trajs_segmented,traj_list)
-
-def save_to_file(path, polynomials, segments):
-    pass 
-
-def create_fit_graph_new2(trajs, name):
-    dir = f'{path}Simplified_trajectories_new'
-    if not os.path.exists(dir):
-        os.makedirs(dir)
-
-
-    for traj, name in zip(trajs, name):
-        lons = []
-        
-        lats = []
-    #time = [x for x in range(0,traj[1][-1][1])]
-
-        for polynomials, segment in zip(traj[0],traj[1]):
-            for i in range(segment[0],segment[1] + 1):
-                lons.append(polynomials[0](i))
-                lats.append(polynomials[1](i))
-        
-        plt.figure(figsize=(8, 6))
-
-        plt.plot(lons,lats)
-
-        plt.title(f'Polynomial prediction of trajectory {name}')
-        plt.xlabel('lon')
-        plt.ylabel('lat')
-
-        plt.savefig(f'{path}Simplified_trajectories_new/{name}')
-        plt.close()
-
-
+    create_fit_graph_new(trajs_segmented,traj_list)
+    
 
 def create_fit_graph_new(trajs, name):
     dir = f'{path}Simplified_trajectories_new'
@@ -146,8 +106,7 @@ def create_original_graph(trajs, names):
     dir = f'{path}Original_trajectories'
     if not os.path.exists(dir):
         os.makedirs(dir)
-
-
+    
     for traj, name in zip(trajs, names):
         lon = traj[0]
         lat = traj[1]
@@ -220,15 +179,9 @@ def segment_trajectory_dyn(lon, lat, time, segment_upper_bound=None):
         lon_segments = lon_segments + temp_lon_segments
     return polynomials_lat, lat_segments, polynomials_lon, lon_segments
 
-def segment_trajectory_simul(lon, lat, time):
-    pre_segmentation = find_jumps(lon,lat)
-    polynomials = []
-    segments = []
-    for start, end in pre_segmentation:
-        _, temp_poly, temp_seg = segment_series_simul(time,lon,lat,start,end)
-        polynomials = polynomials + temp_poly
-        segments = segments + temp_seg
-    return polynomials, segments
+def print_point(x,y):
+    print(f"{x},{y}")
+
 
 def segment_trajectory_dyn_old(lon, lat, time,start_index, end_index = None, segment_upper_bound=None):
     _,polynomials_lat,lat_segments = segment_series(time,lat,start_index,len(time))
@@ -239,34 +192,54 @@ def segment_trajectory_dyn_old(lon, lat, time,start_index, end_index = None, seg
 def euclidean_dist(x1,x2,y1,y2):
     return np.sqrt(pow(x2-x1,2)+ pow(y2-y1,2))
 
-def find_jumps_(lon, lat):
+def cosine_relation(a,b,c):
+    cosine = (pow(a,2) + pow(b,2) - pow(c,2))/(2*a*b)
+    # Account for rounding errors
+    cosine = min(cosine, 1)
+    cosine = max(cosine, -1)
+    return cosine
+
+def find_jumps(lon, lat):
      #Hyper parameters
-    alpha = 40
-    delta = 0.9
+    alpha = 0.03
+    delta = 1.5
     
     dist_arr = []
-    angle_arr = []
+    angle_arr = [1]
     candidate_jumps = []
-    avg = 0
     #Calculate distance between each point and the angle between three points
     for i in range(0, len(lon)-1):
-        dist_arr.append(euclidean_dist(lon[i+1],lon[i],lat[i+1],lat[i]))
+        dist_arr.append(haversine((lat[i],lon[i]),(lat[i+1],lon[i+1]), unit=Unit.METERS)) #Trying to use the haversine instead to get accurate distances
+        # dist_arr.append(euclidean_dist(lon[i+1],lon[i],lat[i+1],lat[i]))
         if i != 0: 
-            dist = euclidean_dist(lon[i+1],lon[i-1],lat[i+1],lat[i-1])
-            angle_arr.append((-pow(dist,2)+pow(dist_arr[i - 1],2)+pow(dist_arr[i],2))/(2*dist_arr[i - 1]*dist_arr[i])) #cosine relation
+            if min(dist_arr[i], dist_arr[i-1]) <= 0 :# np.float64(0.0001): #set a minimun distance as otherwise you can end up dividing by 0
+                angle_arr.append(1)
+            else :
+                dist = haversine((lat[i-1],lon[i-1]),(lat[i+1],lon[i+1]), unit=Unit.METERS)
+                # dist = euclidean_dist(lon[i+1],lon[i-1],lat[i+1],lat[i-1])
+                angle_arr.append(cosine_relation(dist_arr[i - 1], dist_arr[i], dist))
     maxv = max(dist_arr)
-    for i in range(len(dist_arr)-1):
-        avg = avg + (dist_arr[i]-avg)/(i+1)
-    for i in range (1, len(lon)-1):
-        #Distance threshold is dependent on the avg distance for all points
-        if (angle_arr[i-1] <= alpha):
-            if dist_arr[i - 1] >= delta*(maxv-avg) and dist_arr[i] >= delta*(maxv-avg):
-                candidate_jumps.append((i,'o'))
-            elif dist_arr[i - 1] >= delta*(maxv-avg):
-                candidate_jumps.append((i, 'l'))             
-    return construct_segments_(candidate_jumps, len(lon) - 1)
 
-def construct_segments_(jumps,end):
+    avg = 0
+    for i in range(len(dist_arr)):
+        avg = avg + (dist_arr[i]-avg)/(i+1)
+    avg2 = sum(dist_arr)/len(dist_arr)
+
+    # min_jump_dist = delta*(maxv-avg)
+    min_jump_dist = delta*avg
+
+    for i in range (1, len(lon)-1): #Endpoints not included
+        # distance threshold is dependent on the avg distance for all points
+        if angle_arr[i] >= alpha - 1 and dist_arr[i-1] >= min_jump_dist:
+            if dist_arr[i - 1] >= min_jump_dist and dist_arr[i] >= min_jump_dist:
+                candidate_jumps.append((i,'o'))
+            elif dist_arr[i - 1] >= min_jump_dist and dist_arr[i] < min_jump_dist:
+                candidate_jumps.append((i, 'l'))
+            elif dist_arr[i - 1] < min_jump_dist and dist_arr[i] >= min_jump_dist: 
+                candidate_jumps.append((i,'r'))            
+    return construct_segments(candidate_jumps, len(lon) - 1)
+
+def construct_segments(jumps,end):
     if jumps == []:
         return [(0,end)]
     segments = []
@@ -280,47 +253,12 @@ def construct_segments_(jumps,end):
         elif type == 'l':
             segments.append((start,i))
             start = i+1
+        elif type == 'r':
+            segments.append((start,i-1))
+            start = i
     segments.append((jumps[-1][0]+1,end))
     return segments
 
-
-
-def find_jumps(lon,lat):
-    #Hyper parameters
-    alpha = 30
-    delta = 0.7
-
-    dist_arr = []
-    angle_arr = []
-    candidate_jumps = []
-    avg = 0
-    #Calculate distance between each point and the between three points
-    for i in range(0, len(lon)-1):
-        dist_arr.append(euclidean_dist(lon[i+1],lon[i],lat[i+1],lat[i]))
-        if i != 0: 
-            dist = euclidean_dist(lon[i+1],lon[i-1],lat[i+1],lat[i-1])
-            angle_arr.append((-pow(dist,2)+pow(dist_arr[i - 1],2)+pow(dist_arr[i],2))/(2*dist_arr[i - 1]*dist_arr[i])) #cosine relation
-    maxv = max(dist_arr)
-    for i in range(len(dist_arr)-1):
-        avg = avg + (dist_arr[i]-avg)/(i+1)
-    for i in range (1, len(lon)-1):
-        #Distance threshold is dependent on the avg distance for all points
-        if (angle_arr[i-1] >= 180 + alpha or angle_arr[i-1] <= 180 - alpha) and dist_arr[i-1] >= delta*(maxv-avg): 
-            candidate_jumps.append(i)
-    return construct_segments(candidate_jumps, len(lon) - 1)
-
-def construct_segments(jumps,end):
-    if jumps == []:
-        return [(0,end)]
-    segments = []
-    start = 0
-    for i in jumps:
-        if start != i:
-            segments.append((start, i-1))
-        segments.append((i,i))
-        start = i+1
-    segments.append((jumps[-1]+1,end))
-    return segments
 
 def segment_series(time, x, start, end):
     #print(f"{start}, {end}")
@@ -348,33 +286,7 @@ def segment_series(time, x, start, end):
             return sum_error, polynomial_list1 + polynomial_list2, segments1 + segments2
         else:
             return error, [polynomial], [(start, end)]
-        
-def segment_series_simul(time, x,y, start, end):
-    #print(f"{start}, {end}")
-    if start == end:
-        return 0, [(np.polynomial.Polynomial(x[start]),np.polynomial.Polynomial(y[start]))], [(start,end)]
-    if end - start == 1:
-        a1 = (x[end]-x[start])/(time[end]-time[start])
-        a2 = (y[end]-y[start])/(time[end]-time[start])
-        return 0, [(np.polynomial.Polynomial([x[start]-time[start]*a1,a1]),np.polynomial.Polynomial([x[start]-time[start]*a2,a2]))], [(start,end)]
-    polynomial_x = fit_polynomial(time[start:end],x[start:end])
-    polynomial_y = fit_polynomial(time[start:end],y[start:end])
-    error_x,_ = calc_error_SSE(start,end,x,polynomial_x)
-    error_y,_ = calc_error_SSE(start,end,y,polynomial_y)
-    if(end-start < 2*N): 
-        return error_x+error_y, [(polynomial_x,polynomial_y)],[(start,end)]
-    else:
-        q = (start + end)//2
-        sum_error1, polynomial_list1, segments1 = segment_series_simul(time, x,y, start,q-1)
-        sum_error2, polynomial_list2, segments2 = segment_series_simul(time, x,y, q,end)
-        sum_error = sum_error2 + sum_error1
-        if(sum_error < error_x+error_y):
-            return sum_error, polynomial_list1 + polynomial_list2, segments1 + segments2
-        else:
-            return error_x+error_y, [(polynomial_x,polynomial_y)], [(start, end)]
-
-
-
+ 
 E = np.exp(1)
 
 def calc_error_SSE(start_index, end_index, values, polynomial):
@@ -425,6 +337,9 @@ def segment_trajectory(lon, lat, time, start_index=0, end_index=None, segment_up
 
     end_criterion = ((lon_polynomial[1][0][0]/(segment_end - segment_start) < lon_max_error) and (lat_polynomial[1][0][0]/(segment_end - segment_start) < lat_max_error)) or (segment_end - segment_start <= 10)
 
+    lon_segments = []
+    lat_segments = []
+    time_segments = []
     
     if segment_end < segment_upper_bound:
         return segment_trajectory(lon, lat, time, segment_start, segment_end + max((segment_upper_bound - segment_end) // 2, 1), segment_upper_bound)
