@@ -15,7 +15,7 @@ np.set_printoptions(threshold=np.inf)
 
 N = 10 #Lower bound on segment size
 
-path = '../Polynomial trajectory simplification/'
+path = '../Polynomial_trajectory_simplification/'
 
 def create_visualisation(T_num=1000):
 
