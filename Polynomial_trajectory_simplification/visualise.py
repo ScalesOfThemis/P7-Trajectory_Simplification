@@ -151,7 +151,6 @@ def create_fit_graph(trajs, name):
         plt.close()
     return lon_polynomial, lat_polynomial
 
-
 def fit_polynomial(x,y):
     max_deg = len(x)*2//3
     max_error = abs(max(y) - min(y)) * 0.1
@@ -178,6 +177,8 @@ def segment_trajectory_dyn(lon, lat, time, segment_upper_bound=None):
         lon_segments = lon_segments + temp_lon_segments
     return polynomials_lat, lat_segments, polynomials_lon, lon_segments
 
+def print_point(x,y):
+    print(f"{x},{y}")
 
 
 def segment_trajectory_dyn_old(lon, lat, time,start_index, end_index = None, segment_upper_bound=None):
@@ -259,24 +260,6 @@ def construct_segments(jumps,end):
     segments.append((jumps[-1][0]+1,end))
     return segments
 
-def segment_series_simul(time, x, y, start, end):
-    polynomial_x = fit_polynomial(time[start:end],x[start:end])
-    polynomial_y = fit_polynomial(time[start:end],y[start:end])
-    error_x = calc_error_SSE(start,end,x,polynomial_x)
-    error_y = calc_error_SSE(start,end,y,polynomial_y)
-    if(end-start < 2*N): 
-        return error_x + error_y, [(polynomial_x,polynomial_y)],[(start,end)]
-    else:
-        q = (end + start)//2
-        sum_error1, polynomial_list1, segments1 = segment_series(time, x, start,q-1)
-        sum_error2, polynomial_list2, segments2 = segment_series(time, x, q,end)
-        sum_error = sum_error2 + sum_error1
-        if(sum_error < error_x+error_y):
-            return sum_error, polynomial_list1 + polynomial_list2, segments1 + segments2
-        else:
-            return error_x + error_y [(polynomial_x,polynomial_y)], [(start, end)]
-
-
 def segment_series(time, x, start, end):
     #print(f"{start}, {end}")
     if start == end:
@@ -285,14 +268,20 @@ def segment_series(time, x, start, end):
         a = (x[end]-x[start])/(time[end]-time[start])
         return 0, [np.polynomial.Polynomial([x[start]-time[start]*a,a])], [(start,end)]
     polynomial = fit_polynomial(time[start:end],x[start:end])
-    error = calc_error_SSE(start,end,x,polynomial)
+    error, error_arr = calc_error_SSE(start,end,x,polynomial)
     if(end-start < 2*N): 
         return error, [polynomial],[(start,end)]
     else:
-        q = (end + start)//2
+        q = (start + end)//2
+        curr_max_err = 0
+        for i in range(N//2,min(len(error_arr) - N//2,len(error_arr))):
+            if error_arr[i] > curr_max_err:
+                curr_max_err = error_arr[i]
+                q = start+i
+
         sum_error1, polynomial_list1, segments1 = segment_series(time, x, start,q-1)
         sum_error2, polynomial_list2, segments2 = segment_series(time, x, q,end)
-        sum_error = (sum_error2 + sum_error1)
+        sum_error = 0.5*(sum_error2 + sum_error1)
         if(sum_error < error):
             return sum_error, polynomial_list1 + polynomial_list2, segments1 + segments2
         else:
@@ -306,11 +295,14 @@ def calc_error_SSE(start_index, end_index, values, polynomial):
     decay = 0.2
     #size_penalty = 10
     #parameter_penalty = 2
-    
+    errors = []
     result = 0
     for i in range(start_index,end_index): #calc SSE
-        result += pow(values[i] - polynomial(i),2)
-    return result + pow(a*E,-decay*(end_index - start_index - 1))
+        error = pow(values[i] - polynomial(i),2)
+        result += error
+        errors.append(error)
+
+    return result + pow(a*E,-decay*(end_index - start_index - 1)), errors
 
 def calc_error_MSE(start_index, end_index, values, polynomial):
     #Hyperparameters
@@ -320,10 +312,13 @@ def calc_error_MSE(start_index, end_index, values, polynomial):
     #parameter_penalty = 2
     count = 1
     result = 0
+    errors = []
     for i in range(start_index,end_index): #calc SSE
-        result = result + (pow(values[i] - polynomial(i),2)-result)/count
+        error = pow(values[i] - polynomial(i),2)
+        result = result + (error-result)/count
+        errors.append(error)
         count += 1
-    return result + pow(a*E,-decay*(end_index - start_index - 1))
+    return result + pow(a*E,-decay*(end_index - start_index - 1)), errors
 
 
 def segment_trajectory(lon, lat, time, start_index=0, end_index=None, segment_upper_bound=None):
